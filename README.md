@@ -1,5 +1,5 @@
 # MockLiveGameAPI
-A mock implementation of League of Legends in-game API. You can use this application to run a server that completely mimics a game of League of Legends running in the background.
+A mock implementation of League of Legends' in-game API. You can use this application to run a server that completely mimics a game of League of Legends running in the background.
 
 ## How to install
 
