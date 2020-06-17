@@ -1,0 +1,33 @@
+{
+	"name": "mock_live_game_api",
+	"scripts": {
+		"compile": "tsc -p .",
+		"start": "node dist/index.js"
+	},
+	"author": "Querijn Heijmans <querijn@irule.at>",
+	"license": "MIT",
+	"dependencies": {
+		"@types/node-fetch": "^2.5.7",
+		"express": "^4.17.1",
+		"node-fetch": "^2.6.0",
+		"typescript": "^3.8.3"
+	},
+	"version": "1.0.0",
+	"description": "A mock implementation of League of Legends in-game API",
+	"main": "dist/index.js",
+	"devDependencies": {
+		"@types/express": "^4.17.6",
+		"@types/node": "^14.0.13"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Querijn/MockLiveGameAPI.git"
+	},
+	"keywords": [
+		"LeagueOfLegends"
+	],
+	"bugs": {
+		"url": "https://github.com/Querijn/MockLiveGameAPI/issues"
+	},
+	"homepage": "https://github.com/Querijn/MockLiveGameAPI#readme"
+}
