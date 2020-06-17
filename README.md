@@ -5,7 +5,7 @@ A mock implementation of League of Legends in-game API. You can use this applica
 
 1. Download this repository
 2. Ensure you have NodeJS and NPM.
-3. In the root folder, run `npm install && tsc -p 
+3. In the root folder, run `npm install && tsc -p `
 
 After this, you can run `node dist/index.js`, but you can append some optional arguments if you wish:
 - `-port/-p <port number>`, although it is not recommended, as the API should always be on 2999.
