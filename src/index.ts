@@ -5,54 +5,151 @@ import fs from "fs";
 
 import { LiveGame } from "./live_game";
 import { DDragon } from "./ddragon";
+import fetch from "node-fetch";
 
 const privateKey = fs.readFileSync('server/key.pem').toString();
 const certificate = fs.readFileSync('server/cert.pem').toString();
 const app = express();
+const keyRegex = /(RGAPI-)?[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/ig;
 
 let port = 2999;
 let locale = "en_US";
-let gameVersion: string | null = null;
-let shouldStart = false;
+let apiKey = "";
+let region = "euw1";
+let matchId = 4665685331;
+let verbose = false;
+let gameSpeed = 1;
+
+function validateKey(): boolean {
+	try {
+		// Check if the argument is a key
+		if (keyRegex.test(apiKey))
+			return true;
+
+		// Is it an env variable?
+		let newKey = process.env[apiKey];
+		if (newKey && keyRegex.test(newKey)) {
+			apiKey = newKey;
+			return true;
+		}
+
+		// is it a file?
+		newKey = fs.existsSync(apiKey) ? fs.readFileSync(apiKey).toString() : undefined;
+		if (newKey && keyRegex.test(newKey)) {
+			apiKey = newKey;
+			return true;
+		}
+
+		return false;
+	}
+	catch (e) {
+		console.error(`Exception occurred trying to evaluate key argument '${apiKey}': ${e}`);
+		return false;
+	}
+}
 
 (async function() {
-	console.log("Fetching available League of Legends versions...");
-	const gameVersions = <string[]>await DDragon.getAllVersions();
-	gameVersion = gameVersions[0];
-
 	console.log("Parsing arguments");
 	// Parse arguments
-	for (let i = 2; i < process.argv.length; i++) {
-		switch (process.argv[i]) {
 
+	let i = 2;
+
+	for (; i < process.argv.length; i++) {
+		switch (process.argv[i]) {
 			case "-port":
 			case "-p": {
 				port = parseInt(process.argv[++i]);
 				break;
 			}
 
-			case "-patch":
-			case "-v": {
-				const potentialGameVersion = process.argv[++i];
-				if (gameVersions.indexOf(potentialGameVersion) < 0)
-					throw `Unable to parse game version ${potentialGameVersion}. It needs to match one of the DDragon versions listed here: https://ddragon.leagueoflegends.com/api/versions.json`;
-				gameVersion = potentialGameVersion;
+			case "-locale":
+			case "-l": {
+				locale = process.argv[++i];
+
+				const localeRequest = await fetch("https://ddragon.leagueoflegends.com/cdn/languages.json");
+				if (!localeRequest.ok)
+					throw "Request for locale types from DDragon has failed!";
+				const locales = <string[]>await localeRequest.json();
+				if (locales.indexOf(locale) < 0)
+					throw `'${locale}' is not a valid locale. Needs to be one of the following: ${locales.join(", ")}`;
 				break;
 			}
 
-			case "-autorun":
+			case "-region":
 			case "-r": {
-				shouldStart = true;
+				region = process.argv[++i];
+				break;
+			}
+
+			case "-apikey":
+			case "-k": {
+				apiKey = process.argv[++i];
+				break;
+			}
+
+			case "-match":
+			case "-m": {
+				matchId = parseInt(process.argv[++i]);
+				break;
+			}
+
+			case "-gamespeed":
+			case "-s": {
+				gameSpeed = parseFloat(process.argv[++i])
+				break;
+			}
+
+			case "-verbose":
+			case "-v": {
+				verbose = true;
 				break;
 			}
 		}
 	}
 
-	console.log("Initialising server");
-	let game = new LiveGame();
-	//if (shouldStart) // TODO
-		await game.startGame({ allies: [ { isYou: true } ] });
+	let matchData: any = null;
+	let timelineData: any = null;
+	if (fs.existsSync("match.json") && fs.existsSync("timeline.json")) {
+		console.log(`Found existing local match data..`);
+		matchData = JSON.parse(fs.readFileSync("match.json").toString());
+		timelineData = JSON.parse(fs.readFileSync("timeline.json").toString());
+	}
 
+	if (validateKey()) {
+		console.log(`Downloading game data for ${matchId} (${region})..`);
+		const matchRequest = await fetch(`https://${region}.api.riotgames.com/lol/match/v4/matches/${matchId}?api_key=${apiKey}`);
+		if (!matchRequest.ok && matchData == null) {
+			throw `Could not fetch "/lol/match/v4/matches/${matchId}" (region '${region}'), request returned ${matchRequest.status} ${matchRequest.statusText}`;
+		}
+		else if (matchRequest.ok) {
+			const matchText = await matchRequest.text();
+			fs.writeFileSync("match.json", matchText);
+			matchData = JSON.parse(matchText);
+			console.log("Downloaded match");
+		}
+
+		const timelineRequest = await fetch(`https://${region}.api.riotgames.com/lol/match/v4/timelines/by-match/${matchId}?api_key=${apiKey}`);
+		if (!timelineRequest.ok && timelineData == null) {
+			throw `Could not fetch "/lol/match/v4/timelines/by-match/${matchId}" (region '${region}'), request returned ${timelineRequest.status} ${timelineRequest.statusText}`;
+		}
+		else if (timelineRequest.ok) {
+			const matchText = await timelineRequest.text();
+			fs.writeFileSync("timeline.json", matchText);
+			timelineData = JSON.parse(matchText);
+			console.log("Downloaded timeline");
+		}
+	}
+
+	let game = new LiveGame();
+	await game.startGame({ match: matchData, timeline: timelineData, locale, verbose, speedMultiplier: gameSpeed });
+
+	if (verbose) {
+		setInterval(() => {
+			game.update();
+		}, 1000);
+	}
+
+	console.log("Initialising server");
 	app.get('/liveclientdata/allgamedata', function (req, res) {
 		game.isRunning ? res.send(game.allData) : res.status(500).send("No game running");
 	});

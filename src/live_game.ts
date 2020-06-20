@@ -1,26 +1,19 @@
 /// <reference path="../types/live_game.d.ts"/>
 /// <reference path="../types/ddragon_champion.d.ts"/>
+/// <reference path="../types/ddragon_item.d.ts"/>
+/// <reference path="../types/riot_match.d.ts"/>
 
 import { performance } from "perf_hooks";
 import { DDragon } from "./ddragon";
-
-export interface LiveGameOptionsPlayer {
-	summonerName?: string;
-	champion?: string | number;
-	isBot?: boolean;
-	level?: number;
-	runes?: number[];
-	isYou?: boolean;
-};
+import LiveGamePlayer from "./live_game/player";
+import LiveGameActivePlayer from "./live_game/active_player";
 
 export interface LiveGameOptions {
-	patch?: string;
+	match: RiotAPI.Match;
+	timeline: RiotAPI.MatchTimeline;
 	locale?: string;
-	allies: LiveGameOptionsPlayer[];
-	enemies?: LiveGameOptionsPlayer[];
-	alliedTeamIsRed?: boolean;
-	mode?: string;
-	map?: number;
+	verbose?: boolean;
+	speedMultiplier?: number;
 };
 
 export class LiveGame {
@@ -29,8 +22,12 @@ export class LiveGame {
 	private options: LiveGameOptions | null;
 	private startTime: number = 0;
 	private lastFrameTime: number = 0;
-	private ddragon: DDragonAPI.ChampionJSON | null;
-	private goldCounter = 500;
+	private championData: DDragonChampion.JSON | null;
+	private itemData: DDragonItem.JSON | null;
+	private goldCounter = 0;
+	private timelineEvents: RiotAPI.Event[] = [];
+	private lastEventId = 0;
+	private killOffset: {[id: number] : number };
 
 	constructor() {
 	}
@@ -42,15 +39,19 @@ export class LiveGame {
 	generateCurrentPlayer(): LiveGameAPI.ActivePlayer | undefined {
 		if (this.options == null)
 			throw "Unable to generate current player: Cannot initialise game without options!";
-		if (this.ddragon == null)
+		if (this.championData == null)
 			throw "Unable to generate current player: Cannot initialise game without DDragon!";
 
-		const you = this.options.allies.find(c => c.isYou);
+		const you = this.options.match.participants[0];
 		if (!you) // Basically, fake a replay.
 			return;
 
-		const findChampion = you.champion || "Aatrox";
-		const championList = Object.values(this.ddragon.data);
+		const yourIdentity = this.options.match.participantIdentities.find(id => id.participantId == you.participantId);
+		if (!yourIdentity)
+			return;
+
+		const findChampion = you.championId.toString() || "Aatrox";
+		const championList = Object.values(this.championData.data);
 		const champion = championList.find(c => c.id === findChampion || c.key === findChampion);
 		if (champion == null)
 			throw `Unable to generate current player: Unable to identify '${findChampion}' as a champion!`;
@@ -65,10 +66,10 @@ export class LiveGame {
 			};
 		}
 
-		return {
+		return new LiveGameActivePlayer({
 			level: 1,
-			summonerName: you.summonerName || "Holland",
-			currentGold: 500,
+			summonerName: yourIdentity.player.summonerName || "Holland",
+			currentGold: this.goldCounter,
 
 			abilities: {
 				Q: getAbility(0),
@@ -185,35 +186,36 @@ export class LiveGame {
 					}
 				]
 			}
-		};
+		});
 	}
 
-	generateAllPlayers(): LiveGameAPI.Player[] {
+	generateAllPlayers(you: RiotAPI.Participant): LiveGameAPI.Player[] {
 		if (this.options == null)
 			throw "Unable to generate current player: Cannot initialise game without options!";
-		if (this.ddragon == null)
+		if (this.championData == null)
 			throw "Unable to generate current player: Cannot initialise game without DDragon!";
 
 		const players: LiveGameAPI.Player[] = [];
-		const alliedTeamIsRed = this.options.alliedTeamIsRed || false;
+		const alliedTeamIsRed = you.teamId == 200;
 
-		const handlePlayer = (player: LiveGameOptionsPlayer, ally: boolean) => {
-			const findChampion = player.champion || "Aatrox";
-			const championList = Object.values(this.ddragon?.data || {});
+		const handlePlayer = (player: RiotAPI.Participant, ally: boolean) => {
+			const findChampion = player.championId.toString() || "Aatrox";
+			const championList = Object.values(this.championData?.data || {});
 			const champion = championList.find(c => c.id === findChampion || c.key === findChampion);
 			if (champion == null)
 				throw `Unable to generate current player: Unable to identify '${findChampion}' as a champion!`;
 
-			players.push({
+			const ident = this.options?.match.participantIdentities.find(id => id.participantId == player.participantId);
+			players.push(new LiveGamePlayer({
 				championName: champion.name,
-				isBot: player.isBot || false,
+				isBot: false, // TODO
 				isDead: false,
 				items: [],
 				level: 0,
 				position: "", // ???
 				rawChampionName: `game_character_displayname_${champion.id}`,
 				respawnTimer: 0,
-				runes: {
+				runes: { // TODO
 					keystone: {
 						displayName: "Electrocute",
 						id: 8112,
@@ -241,7 +243,7 @@ export class LiveGame {
 					wardScore: 0.0
 				},
 				skinID: 0,
-				summonerName: player.summonerName || (player.isBot ? `${champion.name} Bot` : "Holland"),
+				summonerName: ident?.player.summonerName || `${champion.name} Bot`,
 				summonerSpells: { // TODO
 					summonerSpellOne: {
 						displayName: "Flash",
@@ -255,12 +257,14 @@ export class LiveGame {
 					}
 				},
 				team: ally === alliedTeamIsRed ? "CHAOS" : "ORDER"
-			});
+			}));
 		}
 
-		for (const player of this.options?.allies)
+		const allies = this.options.match.participants.filter(p => p.teamId == you.teamId);
+		const opponents = this.options.match.participants.filter(p => p.teamId != you.teamId);
+		for (const player of allies)
 			handlePlayer(player, true);
-		for (const player of (this.options?.enemies || []))
+		for (const player of opponents)
 			handlePlayer(player, false);
 
 		return players;
@@ -269,19 +273,47 @@ export class LiveGame {
 	async startGame(options: LiveGameOptions) {
 		this.options = options;
 		this.lastFrameTime = this.startTime = performance.now();
+		this.timelineEvents = [];
+		this.lastEventId = -1;
+
+		switch (options.match.gameMode) {
+			case "ARAM":
+				this.goldCounter = 1400;
+				break;
+
+			default:
+				this.goldCounter = 500;
+				break;
+		}
+
+		this.options.speedMultiplier = (this.options.speedMultiplier || 1);
 
 		const locale = this.options.locale || "en_US";
-		const patch = this.options.patch || (await DDragon.getAllVersions())[0]; // latest
 
-		const response = await DDragon.request("championFull.json", patch, locale);
-		if (response.ok == false)
-			throw "Unable to initialise game, unable to fetch DDragon Champion json file!";
-		this.ddragon = <DDragonAPI.ChampionJSON>(await response.json());
+		const v = this.options.match.gameVersion.split(".");
+		const patch = `${v[0]}.${v[1]}.1` || (await DDragon.getAllVersions())[0]; // latest
 
-		const mapNumber = this.options.map || 11; // Summoner's Rift
+		// Init ddragon
+		const championResponse = await DDragon.request("championFull.json", patch, locale);
+		if (championResponse.ok == false)
+			throw `Unable to initialise game, unable to fetch DDragon's championFull.json file (patch: ${patch}, locale: ${locale})!`;
+		this.championData = <DDragonChampion.JSON>(await championResponse.json());
+
+		const itemResponse = await DDragon.request("item.json", patch, locale);
+		if (itemResponse.ok == false)
+			throw `Unable to initialise game, unable to fetch DDragon's item.json file (patch: ${patch}, locale: ${locale})!`;
+		this.itemData = <DDragonItem.JSON>(await itemResponse.json());
+
+		// Put all events in order
+		for (const frame of this.options.timeline.frames)
+			this.timelineEvents.push(...frame.events);
+		this.timelineEvents = this.timelineEvents.sort((a, b) => a.timestamp - b.timestamp);
+
+		const you = this.options.match.participants[0];
+		const mapNumber = this.options.match.mapId || 11; // Summoner's Rift
 		this.data = {
 			activePlayer: this.generateCurrentPlayer(),
-			allPlayers: this.generateAllPlayers(),
+			allPlayers: this.generateAllPlayers(you),
 			events: {
 				Events: [{
 					EventID: 0,
@@ -290,7 +322,7 @@ export class LiveGame {
 				}]
 			},
 			gameData: {
-				gameMode: this.options.mode || "CLASSIC",
+				gameMode: this.options.match.gameMode || "CLASSIC",
 				gameTime: 0,
 				mapName: "Map" + mapNumber,
 				mapNumber: mapNumber,
@@ -300,16 +332,210 @@ export class LiveGame {
 	}
 
 	update() {
-		if (this.data == null)
-			throw "Cannot update LiveGame! It has not initialised!";
+		if (this.data == null || this.itemData == null)
+			throw "Cannot update LiveGame! It has not been initialised!";
 
-		const deltaSec = (performance.now() - this.lastFrameTime) / 1000;
+		const speedMult = (this.options?.speedMultiplier || 1);
+		const deltaSec = ((performance.now() - this.lastFrameTime) / 1000) * speedMult;
 		this.lastFrameTime = performance.now();
+
+		const gameTimeMS = (performance.now() - this.startTime) * speedMult;
+
+		// Process timeline events
+		while (true) {
+			const nextEventId = this.lastEventId + 1;
+			const event = this.timelineEvents[nextEventId];
+			if (event == null || event.timestamp > gameTimeMS)
+				break;
+			
+			const participantId = event.participantId || -1;
+			let participant = this.options?.match.participantIdentities.find(p => p.participantId == participantId);
+
+			this.lastEventId++;
+			switch (event.type) {
+				case "SKILL_LEVEL_UP": {
+					console.log(`An event occurred: ${participant?.player.summonerName} (id ${participantId}) leveled up ${[ "UNKNOWN", "Q", "W", "E", "R" ][event.skillSlot || 0]}.`);
+					break;
+				}
+
+				case "ITEM_PURCHASED": {
+					if (participant == null)
+						throw `Unable to process ITEM_PURCHASED without a participant!`;
+
+					const itemId = (event.itemId || "1001").toString();
+					const item = this.itemData.data[itemId];
+					console.log(`An event occurred: ${participant.player.summonerName} (id ${participantId}) purchased ${item.name} (${itemId}).`);
+					
+					const player = <LiveGamePlayer>this.data.allPlayers.find(p => p.summonerName === participant?.player.summonerName);
+					if (player == null)
+						throw `Could not find player ${participant.player.summonerName} in the game!`;
+
+					if (item.gold && this.data.activePlayer && player.summonerName == this.data.activePlayer.summonerName) {
+						const activePlayer = <LiveGameActivePlayer>(this.data.activePlayer); 
+						activePlayer.spendGold(player, itemId, this.itemData);
+					}
+
+					player.addItem(itemId, item);
+					break;
+				}
+
+				case "ITEM_SOLD": {
+					if (participant == null)
+						throw `Unable to process ITEM_SOLD without a participant!`;
+
+					const itemId = (event.itemId || "1001").toString();
+					const item = this.itemData.data[itemId];
+					console.log(`An event occurred: ${participant.player.summonerName} (id ${participantId}) sold item ${item.name} (${event.itemId}).`);
+
+					const player = <LiveGamePlayer>this.data.allPlayers.find(p => p.summonerName === participant?.player.summonerName);
+					if (player == null)
+						throw `Could not find player ${participant.player.summonerName} in the game!`;
+
+					if (item.gold && this.data.activePlayer && player.summonerName == this.data.activePlayer.summonerName) {
+						const activePlayer = <LiveGameActivePlayer>(this.data.activePlayer); 
+						activePlayer.refundGold(player, itemId, this.itemData, true);
+					}
+
+					player.removeItem(itemId, item);
+					break;
+				}
+
+				case "ITEM_UNDO":
+				case "ITEM_DESTROYED": {
+					if (participant == null)
+						throw `Unable to process ITEM_UNDO/ITEM_DESTROYED without a participant!`;
+
+					const itemId = (event.itemId || "1001").toString();
+					const item = this.itemData.data[itemId];
+					const wasUsed = event.type == "ITEM_DESTROYED" ? true : false;
+					console.log(`An event occurred: ${participant.player.summonerName} (id ${participantId}) ${wasUsed ? "used" : "refunded"} item ${item.name} (${event.itemId}).`);
+
+					const player = <LiveGamePlayer>this.data.allPlayers.find(p => p.summonerName === participant?.player.summonerName);
+					if (player == null)
+						throw `Could not find player ${participant.player.summonerName} in the game!`;
+
+					if (!wasUsed && item.gold && this.data.activePlayer && player.summonerName == this.data.activePlayer.summonerName) {
+						const activePlayer = <LiveGameActivePlayer>(this.data.activePlayer); 
+						activePlayer.refundGold(player, itemId, this.itemData, false);
+					}
+
+					player.removeItem(itemId, item);
+					break;
+				}
+
+				case "CHAMPION_KILL": {
+					if (event.assistingParticipantIds == null)
+						throw "Unexpected null assistingParticipantIds in CHAMPION_KILL";
+					let killer = this.options?.match.participantIdentities.find(p => p.participantId == event.killerId);
+					let victim = this.options?.match.participantIdentities.find(p => p.participantId == event.victimId);
+					let assistants = event.assistingParticipantIds.map(id => this.options?.match.participantIdentities.find(p => p.participantId == id));
+
+					for (const player of this.data.allPlayers) {
+						const participant = this.options?.match.participantIdentities.find(p => p.player.summonerName === player.summonerName);
+						if (!participant)
+							continue;
+
+						if (event.killerId == participant.participantId)
+							player.scores.kills++;
+							
+						else if (event.victimId == participant.participantId)
+							player.scores.deaths++;
+
+						else if (event.assistingParticipantIds.indexOf(participant.participantId) >= 0)
+							player.scores.assists++;
+					}
+					console.log(`An event occurred: ${killer?.player.summonerName} (assists: ${assistants?.map(a => a?.player.summonerName).join("/")}) killed ${victim?.player.summonerName}.`);
+					break;
+				}
+
+				case "WARD_PLACED":
+				case "WARD_KILL": {
+					switch (event.wardType) {
+						case "UNDEFINED":
+						case "TEEMO_MUSHROOM":
+							break;
+
+						default:
+							debugger;
+					}
+					break;
+				}
+
+				case "BUILDING_KILL": {
+					if (event.assistingParticipantIds == null)
+						throw "Unexpected null assistingParticipantIds in BUILDING_KILL";
+
+					// Check if player was on the killing team
+					const player = this.data.allPlayers.find(p => p.summonerName == this.data?.activePlayer?.summonerName);
+					if (player == null)
+						break;
+
+					const playerIsBlueTeam = player.team == "ORDER";
+					let killer = this.options?.match.participants.find(p => p.participantId == event.killerId);
+					if (killer == null)
+						continue;
+
+					let killerIsBlueTeam = killer.teamId == 100;
+					if (killerIsBlueTeam != playerIsBlueTeam)
+						continue;
+
+					// Determine gold amounts
+					let globalGold = 0;
+					let localGold = 0;
+					switch (event.buildingType) {
+						case "TOWER_BUILDING": {
+							if (this.options?.match.gameMode == "ARAM") {
+								globalGold = 150;
+								localGold = 0;
+							}
+							else {
+								debugger; // TODO: verify global gold amount
+							}
+							break;
+						}
+
+						default:
+							localGold = 50;
+							debugger;
+							break;
+					}
+
+					this.goldCounter += globalGold;
+
+					// Check if we should give local gold
+					if (localGold != 0) {
+						let killerId = this.options?.match.participantIdentities.find(p => p.participantId == event.killerId);
+						if (killerId && killerId.player.summonerName == player.summonerName) {
+							this.goldCounter += localGold;
+							break;
+						}
+
+						let assistants = event.assistingParticipantIds.map(id => this.options?.match.participantIdentities.find(p => p.participantId == id));
+						for (let assistant of assistants) {
+							if (assistant == null || assistant.player.summonerName != player.summonerName)
+								continue;
+
+							this.goldCounter += localGold;
+							break;
+						}
+					}
+					break;
+				}
+
+				default:
+					console.log(`An event occurred: ${event.type} at ${event.timestamp}`);
+					debugger;
+			}
+		}
 		
 		if (this.data.activePlayer) {
 			const goldPerSec = 3;
 			this.goldCounter += goldPerSec * deltaSec;
 			this.data.activePlayer.currentGold = Math.floor(this.goldCounter);
+		}
+
+		if (this.options?.verbose) {
+			console.log(`Game time: ${Math.floor(gameTimeMS / 1000)}`);
 		}
 	}
 
@@ -324,7 +550,7 @@ export class LiveGame {
 
 	get activePlayer() {
 		if (this.data == null)
-			throw "Cannot update LiveGame! It has not initialised!";
+			throw "Cannot update LiveGame! It has not been initialised!";
 		if (this.data.activePlayer == null)
 			return this.getError(400, "RPC_ERROR", "Spectator mode doesn't currently support this feature");
 		return this.data.activePlayer;
@@ -339,7 +565,7 @@ export class LiveGame {
 
 	get activePlayerAbilities() {
 		if (this.data == null)
-			throw "Cannot update LiveGame! It has not initialised!";
+			throw "Cannot update LiveGame! It has not been initialised!";
 		if (this.data.activePlayer == null)
 			return this.getError(400, "RPC_ERROR", "Spectator mode doesn't currently support this feature");
 
@@ -348,7 +574,7 @@ export class LiveGame {
 
 	get activePlayerRunes() {
 		if (this.data == null)
-			throw "Cannot update LiveGame! It has not initialised!";
+			throw "Cannot update LiveGame! It has not been initialised!";
 		if (this.data.activePlayer == null)
 			return this.getError(400, "RPC_ERROR", "Spectator mode doesn't currently support this feature");
 
@@ -357,7 +583,7 @@ export class LiveGame {
 
 	get allPlayers() {
 		if (this.data == null)
-			throw "Cannot update LiveGame! It has not initialised!";
+			throw "Cannot update LiveGame! It has not been initialised!";
 		if (this.data.activePlayer == null)
 			return this.getError(400, "RPC_ERROR", "Spectator mode doesn't currently support this feature");
 
@@ -366,13 +592,13 @@ export class LiveGame {
 
 	get events() {
 		if (this.data == null)
-			throw "Cannot update LiveGame! It has not initialised!";
+			throw "Cannot update LiveGame! It has not been initialised!";
 		return this.data.events;
 	}
 
 	get stats() {
 		if (this.data == null)
-			throw "Cannot update LiveGame! It has not initialised!";
+			throw "Cannot update LiveGame! It has not been initialised!";
 		return this.data.gameData;
 	}
 

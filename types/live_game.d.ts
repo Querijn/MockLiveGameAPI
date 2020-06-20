@@ -121,7 +121,7 @@ declare namespace LiveGameAPI {
 		skinName?: string;
 		summonerName: string;
 		summonerSpells: SummonerSpells;
-		team: string;
+		team: "ORDER" | "CHAOS";
 	}
 
 	export interface Event {

@@ -1,4 +1,4 @@
-declare module DDragonAPI {
+declare module DDragonChampion {
     export interface Image {
         full: string;
         sprite: string;
@@ -137,7 +137,7 @@ declare module DDragonAPI {
         recommended: Recommended[];
     }
 
-    export interface ChampionJSON {
+    export interface JSON {
         type: string;
         format: string;
         version: string;

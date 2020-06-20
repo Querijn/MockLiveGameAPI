@@ -9,7 +9,9 @@
 			"request": "launch",
 			"name": "Launch Program",
 			"program": "${workspaceFolder}/dist/index.js",
-			"preLaunchTask": "compile"
+			"preLaunchTask": "compile",
+			"args": [ "-s", "10", "-v" ],
+			"console": "externalTerminal"
 		},
 		{
 			"type": "chrome",
