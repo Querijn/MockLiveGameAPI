@@ -2,13 +2,15 @@ import process from "process";
 import express from "express";
 import https from "https";
 import fs from "fs";
+import path from 'path';
 
 import { LiveGame } from "./live_game";
 import { DDragon } from "./ddragon";
 import fetch from "node-fetch";
 
-const privateKey = fs.readFileSync('server/key.pem').toString();
-const certificate = fs.readFileSync('server/cert.pem').toString();
+const appRoot = path.resolve(__dirname, "../");
+const privateKey = fs.readFileSync(path.resolve(appRoot, 'server/key.pem')).toString();
+const certificate = fs.readFileSync(path.resolve(appRoot, 'server/cert.pem')).toString();
 const app = express();
 const keyRegex = /(RGAPI-)?[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}/ig;
 
@@ -53,6 +55,8 @@ function validateKey(): boolean {
 	// Parse arguments
 
 	let i = 2;
+
+	console.log(process.argv);
 
 	for (; i < process.argv.length; i++) {
 		switch (process.argv[i]) {
@@ -109,10 +113,10 @@ function validateKey(): boolean {
 
 	let matchData: any = null;
 	let timelineData: any = null;
-	if (fs.existsSync("match.json") && fs.existsSync("timeline.json")) {
+	if (fs.existsSync(path.resolve(appRoot, "match.json")) && fs.existsSync(path.resolve(appRoot, "timeline.json"))) {
 		console.log(`Found existing local match data..`);
-		matchData = JSON.parse(fs.readFileSync("match.json").toString());
-		timelineData = JSON.parse(fs.readFileSync("timeline.json").toString());
+		matchData = JSON.parse(fs.readFileSync(path.resolve(appRoot, "match.json")).toString());
+		timelineData = JSON.parse(fs.readFileSync(path.resolve(appRoot, "timeline.json")).toString());
 	}
 
 	if (validateKey()) {
@@ -123,7 +127,7 @@ function validateKey(): boolean {
 		}
 		else if (matchRequest.ok) {
 			const matchText = await matchRequest.text();
-			fs.writeFileSync("match.json", matchText);
+			fs.writeFileSync(path.resolve(appRoot, "match.json"), matchText);
 			matchData = JSON.parse(matchText);
 			console.log("Downloaded match");
 		}
@@ -134,7 +138,7 @@ function validateKey(): boolean {
 		}
 		else if (timelineRequest.ok) {
 			const matchText = await timelineRequest.text();
-			fs.writeFileSync("timeline.json", matchText);
+			fs.writeFileSync(path.resolve(appRoot, "timeline.json"), matchText);
 			timelineData = JSON.parse(matchText);
 			console.log("Downloaded timeline");
 		}
