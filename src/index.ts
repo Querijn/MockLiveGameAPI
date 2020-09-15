@@ -162,6 +162,10 @@ function validateKey(): boolean {
 		game.isRunning ? res.send(game.activePlayer) : res.status(500).send("No game running");
 	});
 
+	app.get('/liveclientdata/activeplayername', function (req, res) {
+		game.isRunning ? res.send(game.activePlayer.summonerName) : res.status(500).send("No game running");
+	});
+
 	app.get('/liveclientdata/activeplayerabilities', function (req, res) {
 		game.isRunning ? res.send(game.activePlayerAbilities) : res.status(500).send("No game running");
 	});
