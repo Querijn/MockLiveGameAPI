@@ -68,7 +68,6 @@ export default class LiveGamePlayer implements LiveGameAPI.Player {
 
 	removeItem(itemId: string, item: DDragonItem.Item) {
 
-		// TODO: Resolve recipes
 		const inventorySpotIndex = this.items.findIndex(i => i.itemID.toString() == itemId.toString());
 
 		// First see if we can decrement the inventory spot as a stackable.

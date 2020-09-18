@@ -19,3 +19,13 @@ You can run the application by running `node dist/index.js`. This will automatic
 - `-match/-m <match id>`, a match id by Riot Games to download with the API key. 
 - `-gamespeed/-s <gamespeed multiplier>`, makes time go by faster.
 - `-verbose/-v`, outputs data every second in the window.
+
+### Issues and TODO:
+- There's unfortunately no event for a summoner levelup, meaning that I have to fake it. I currently do not check for any abnormal skill levelups, so evolution-based champions might get an incorrect level here.
+- Everyone has Ignite and Flash as their default `summonerSpells` hardcoded.
+- `wardScore` is not implemented.
+- `rawDescriptions` and `rawDisplayNames` for items are missing.
+- `resourceTypes` always result in "MANA".
+- `fullRunes`/`runes` are currently always the same, for everyone.
+- `isBot` is always false.
+- Some parameters on items aren't verified, and might be incorrect (`consumable`, for instance.)
