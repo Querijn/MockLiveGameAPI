@@ -26,7 +26,9 @@ export class LiveGame {
 	private itemData: DDragonItem.JSON | null;
 	private goldCounter = 0;
 	private timelineEvents: RiotAPI.Event[] = [];
+	private frames: RiotAPI.Frame[] = [];
 	private lastEventId = 0;
+	private currentFrameIndex = 0;
 	private killOffset: {[id: number] : number };
 
 	constructor() {
@@ -274,7 +276,9 @@ export class LiveGame {
 		this.options = options;
 		this.lastFrameTime = this.startTime = performance.now();
 		this.timelineEvents = [];
+		this.frames = [];
 		this.lastEventId = -1;
+		this.currentFrameIndex = 0;
 
 		switch (options.match.gameMode) {
 			case "ARAM":
@@ -305,9 +309,12 @@ export class LiveGame {
 		this.itemData = <DDragonItem.JSON>(await itemResponse.json());
 
 		// Put all events in order
-		for (const frame of this.options.timeline.frames)
+		for (const frame of this.options.timeline.frames) {
 			this.timelineEvents.push(...frame.events);
+			this.frames.push(frame);
+		}
 		this.timelineEvents = this.timelineEvents.sort((a, b) => a.timestamp - b.timestamp);
+		this.frames = this.frames.sort((a, b) => a.timestamp - b.timestamp);
 
 		const you = this.options.match.participants[0];
 		const mapNumber = this.options.match.mapId || 11; // Summoner's Rift
@@ -332,10 +339,10 @@ export class LiveGame {
 	}
 
 	update() {
-		if (this.data == null || this.itemData == null)
+		if (this.data == null || this.itemData == null || this.options == null)
 			throw "Cannot update LiveGame! It has not been initialised!";
 
-		const speedMult = (this.options?.speedMultiplier || 1);
+		const speedMult = (this.options.speedMultiplier || 1);
 		const deltaSec = ((performance.now() - this.lastFrameTime) / 1000) * speedMult;
 		this.lastFrameTime = performance.now();
 
@@ -543,6 +550,32 @@ export class LiveGame {
 				default:
 					console.log(`An event occurred: ${event.type} at ${event.timestamp}`);
 					debugger;
+			}
+		}
+
+		// Process participantFrame
+		let low = this.frames[this.currentFrameIndex];
+		let high = this.frames[this.currentFrameIndex + 1];
+		if (high != null) {
+			// Go to next frame
+			if (gameTimeMS > high.timestamp) {
+				this.currentFrameIndex++;
+				low = high;
+				high = this.frames[this.currentFrameIndex + 1];
+			}
+
+			for (let participant of this.options.match.participantIdentities) {
+				const lerp = (value1: number, value2: number, amount: number) => { return (1 - amount) * value1 + amount * value2; };
+
+				const player = <LiveGamePlayer|undefined>this.data.allPlayers.find(p => p.summonerName === participant?.player.summonerName);
+				if (player == null)
+					throw `Could not find player with participantId ${participant.participantId} (${participant.player.summonerName})`;
+
+				const begin = low.participantFrames[participant.participantId];
+				const end = high.participantFrames[participant.participantId];
+				const progress = (gameTimeMS - low.timestamp) / (high.timestamp - low.timestamp);
+
+				player.scores.creepScore = Math.round(lerp(begin.minionsKilled, end.minionsKilled, progress));
 			}
 		}
 		
