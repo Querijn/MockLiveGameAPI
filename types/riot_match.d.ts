@@ -208,7 +208,7 @@ declare module RiotAPI {
 		victimId?: number;
 	}
 
-	export interface Frame {
+	export interface ParticipantFrame {
 		participantId: number;
 		position: Position;
 		currentGold: number;
@@ -222,7 +222,7 @@ declare module RiotAPI {
 	}
 
 	export interface Frame {
-		participantFrames: { [id: string]: Frame };
+		participantFrames: { [id: string]: ParticipantFrame };
 		events: Event[];
 		timestamp: number;
 	}
