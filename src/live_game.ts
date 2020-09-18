@@ -467,6 +467,7 @@ export class LiveGame {
 
 				case "WARD_PLACED":
 				case "WARD_KILL": {
+					// TODO: Update ward score
 					switch (event.wardType) {
 						case "UNDEFINED":
 						case "TEEMO_MUSHROOM":
