@@ -340,6 +340,7 @@ export class LiveGame {
 		this.lastFrameTime = performance.now();
 
 		const gameTimeMS = (performance.now() - this.startTime) * speedMult;
+		this.data.gameData.gameTime = gameTimeMS / 1000;
 
 		// Process timeline events
 		while (true) {
