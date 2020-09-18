@@ -355,7 +355,23 @@ export class LiveGame {
 			this.lastEventId++;
 			switch (event.type) {
 				case "SKILL_LEVEL_UP": {
-					console.log(`An event occurred: ${participant?.player.summonerName} (id ${participantId}) leveled up ${[ "UNKNOWN", "Q", "W", "E", "R" ][event.skillSlot || 0]}.`);
+					if (participant == null)
+						throw `Unable to process SKILL_LEVEL_UP without a participant!`;
+
+					const key = [ "UNKNOWN", "Q", "W", "E", "R" ][event.skillSlot || 0];
+					console.log(`An event occurred: ${participant.player.summonerName} (id ${participantId}) leveled up ${key}.`);
+					
+					const player = <LiveGamePlayer|undefined>this.data.allPlayers.find(p => p.summonerName === participant?.player.summonerName);
+					if (player != null)
+						player.level++;
+
+					if (this.data.activePlayer && participant.player.summonerName == this.data.activePlayer.summonerName) {
+						const activePlayer = <LiveGameActivePlayer>(this.data.activePlayer); 
+						
+						const ability = activePlayer.abilities[key];
+						if (typeof ability.abilityLevel !== 'undefined')
+							ability.abilityLevel++;
+					}
 					break;
 				}
 
