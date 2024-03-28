@@ -8,7 +8,7 @@
 	"license": "MIT",
 	"dependencies": {
 		"@types/node-fetch": "^2.5.7",
-		"express": "^4.17.3",
+		"express": "^4.19.2",
 		"node-fetch": "^2.6.7",
 		"typescript": "^3.8.3"
 	},
